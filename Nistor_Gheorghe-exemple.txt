@@ -1,0 +1,128 @@
+--11. ==================================================================================
+--1) Afisarea informatii despre toate fetele care au participat la evenimente de MTB.
+SELECT per.nume,
+       per.prenume,
+       e.nume                                AS nume_eveniment,
+       b.model                               AS model_bicicleta,
+       rez.timp,
+       t.distanta,
+       CASE
+         WHEN t.nivel_dificultate = 1 THEN 'Usor'
+         WHEN t.nivel_dificultate = 2 THEN 'Mediu'
+         ELSE 'Greu'
+       END                                   AS traseu_dificultate,
+       Format(e.data, N'dd MMMM yyyy', 'ro') AS data
+FROM   rezultat rez
+       JOIN rider rid
+         ON rez.id_rider = rid.id_rider
+       JOIN persoana per
+         ON rid.id_persoana = per.id_persoana
+       JOIN bicicleta b
+         ON rez.id_bicicleta = b.id_bicicleta
+       JOIN traseu t
+         ON rez.id_traseu = t.id_traseu
+       JOIN eveniment e
+         ON t.id_eveniment = e.id_eveniment
+WHERE  per.sex = 'F' 
+
+--2) Afisarea persoanei care a participat la cele mai multe evenimente de mountain-bike
+
+SELECT TOP 1 per.id_persoana,
+	         UPPER(CONCAT(per.nume,' ', per.prenume)) as nume,
+             Count(per.id_persoana) AS numar_participari
+FROM   rezultat rez
+       INNER JOIN rider rid
+               ON rez.id_rider = rid.id_rider
+       INNER JOIN persoana per
+               ON rid.id_persoana = per.id_persoana
+GROUP  BY per.id_persoana,
+          per.nume,
+          per.prenume
+ORDER  BY numar_participari DESC 
+
+--3) Average-ul level-ul ciclistilor care au participat la evenimente cu trasee dificile.
+--(subcereri nesincronizate)
+
+WITH ciclisti_cu_experienta AS
+(
+       SELECT *
+       FROM   rider
+       WHERE  id_rider IN
+              (
+                     SELECT id_rider
+                     FROM   rezultat
+                     WHERE  id_traseu IN
+                            (
+                                   SELECT id_traseu
+                                   FROM   traseu
+                                   WHERE  nivel_dificultate = 3)) )
+SELECT AVG(level) FROM ciclisti_cu_experienta;
+
+--4) Afisez statusul voluntarilor. Voluntarii au un status activ doar daca au ajutat la un eveniment din anul curent, în caz contrar aceștia sunt considerati inactivi.
+--(subcereri sincronizate)
+
+SELECT CONCAT(p.nume, ' ', p.prenume) as nume,
+CASE 
+	WHEN (
+		SELECT COUNT(*)
+		FROM AJUTA a
+		JOIN EVENIMENT e
+		ON a.id_eveniment = e.id_eveniment
+		WHERE a.id_voluntar = v.id_voluntar and YEAR(e.data) = YEAR(GETDATE())
+	) > 1
+	THEN 'VOLUNTAR ACTIV'
+    ELSE 'VOLUNTAR INACTIV'
+END as 'status'
+FROM VOLUNTAR v
+JOIN PERSOANA p 
+ON v.id_persoana = p.id_persoana
+
+--5)  Afisarea sumei totală de bani pe care un eveniment o primeste din partea tuturor sponsorilor.
+
+SELECT e.nume, SUM((ISNULL(bani,  0)*1.025)) as bani
+FROM CONTRACT_SPONSOR  cs
+JOIN EVENIMENT e
+ON cs.id_eveniment = e.id_eveniment
+GROUP by e.nume
+
+--12 ================================================================================== 
+--1) Suma de bani pe care companiile o oferă evenimentului Maratonul Dunării crește cu 5%.
+UPDATE CONTRACT_SPONSOR
+SET bani = bani + 0.05*bani
+WHERE id_eveniment = (SELECT id_eveniment
+                      FROM   eveniment
+                      WHERE  nume = 'Maratonul Dunarii');
+
+--2) Premiul_1 va crește cu 100 lei dacă există cel puțin o companie care a sponzorizat evenimentul cu peste 1500 lei.
+UPDATE PREMII
+SET premiul_I = premiul_I + 100
+WHERE id_eveniment in (SELECT id_eveniment
+                      FROM   CONTRACT_SPONSOR
+                      WHERE  bani > 1500);
+
+--3) Toate organizațiile care au evenimente in județul Argeș vor aveea un număr de telefon comun.
+UPDATE organizator
+SET    telefon = '0728053829'
+WHERE  id_organizator IN (SELECT id_organizator
+                          FROM   eveniment
+                          WHERE  locatie LIKE '%Arges%')
+
+--14. ==================================================================================
+CREATE OR ALTER VIEW [Evenimente cu mai mult de 3 sponsori] AS
+SELECT e.nume, COUNT(*)  as numar_sponsori
+FROM Contract_Sponsor cs   
+JOIN EVENIMENT e
+ON cs.id_eveniment =  e.id_eveniment
+GROUP BY e.nume, cs.id_eveniment
+HAVING (COUNT(*)) > 3
+SELECT * FROM [Evenimente cu mai mult de 3 sponsori]
+
+-- exemplu de LMD permis - Limbajul de prelucrare a datelor
+UPDATE [Evenimente cu mai mult de 3 sponsori] set nume = CONCAT("(EVENIMENT):", nume);
+
+-- exemplu de LMD nepermis (generează eroare)
+DELETE FROM [Evenimente cu mai mult de 3 sponsori]
+
+--15. ==================================================================================
+
+SELECT * FROM CONTRACT_SPONSOR WHERE bani > 1000  and tip_produs IS NOT NULL
